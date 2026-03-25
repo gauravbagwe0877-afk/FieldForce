@@ -1,0 +1,6 @@
+target/
+.idea/
+*.log
+maven.zip
+maven_output*.txt
+apache-maven-*/
