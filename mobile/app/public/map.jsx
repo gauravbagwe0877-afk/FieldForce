@@ -7,78 +7,119 @@ import * as Location from 'expo-location'
 import { colors, radius } from '../../constants/theme'
 import MapComponent from '../../components/MapComponent'
 
-// Simulated nearby active workers
-const MOCK_NEARBY_WORKERS = [
-  { id: 'W-01', name: 'Ravi K.', status: 'Active', distance: 0.4 },
-  { id: 'W-02', name: 'Alok S.', status: 'Task In-Progress', distance: 1.2 },
-  { id: 'W-03', name: 'Manish T.', status: 'Active', distance: 1.8 },
-  { id: 'W-04', name: 'Sunita P.', status: 'On Break', distance: 2.3 },
-]
+import { useState, useEffect } from 'react'
+import {
+  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, Dimensions
+} from 'react-native'
+import { router } from 'expo-router'
+import * as Location from 'expo-location'
+import { colors, radius } from '../../constants/theme'
+import MapComponent from '../../components/MapComponent'
+import { API_BASE } from '../../lib/config'
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window')
 
 export default function PublicMapScreen() {
-  const [location, setLocation] = useState(null)
+  const [userLocation, setUserLocation] = useState(null)
+  const [workers, setWorkers] = useState([])
   const [loading, setLoading] = useState(true)
+
+  const fetchPublicLocations = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/location/public`)
+      if (res.ok) {
+        const data = await res.json()
+        setWorkers(data)
+      }
+    } catch (err) {
+      console.error('Error fetching public locations:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
       if (status === 'granted') {
         Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
           .then(loc => {
-            setLocation(loc.coords)
-            setLoading(false)
+            setUserLocation(loc.coords)
+            fetchPublicLocations()
           })
           .catch(() => setLoading(false))
       } else {
         setLoading(false)
       }
     })
+    
+    const interval = setInterval(fetchPublicLocations, 10000) // update every 10s
+    return () => clearInterval(interval)
   }, [])
+
+  // Calculate distance helper
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return '?.?'
+    const R = 6371 // km
+    const dLat = (lat2 - lat1) * Math.PI / 180
+    const dLon = (lon2 - lon1) * Math.PI / 180
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon/2) * Math.sin(dLon/2)
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+    return (R * c).toFixed(1)
+  }
 
   return (
     <View style={styles.root}>
-      {/* Real Map Layer */}
       <View style={styles.mapArea}>
-        {loading ? (
+        {loading && workers.length === 0 ? (
           <ActivityIndicator color={colors.accentBlue} size="large" />
-        ) : !location ? (
+        ) : !userLocation ? (
           <View style={styles.mapInner}>
             <Text style={styles.mapEmoji}>📍</Text>
             <Text style={styles.mapTitle}>Location Required</Text>
-            <Text style={styles.mapSub}>We need GPS access to find workers near you.</Text>
+            <Text style={styles.mapSub}>Accessing GPS for transparency...</Text>
           </View>
         ) : (
-          <MapComponent location={location} workers={MOCK_NEARBY_WORKERS} />
+          <MapComponent location={userLocation} workers={workers} />
         )}
       </View>
 
-      {/* Sheet overlaid at bottom */}
-      <View style={styles.sheet}>
+      <View style={[styles.sheet, { maxHeight: SCREEN_HEIGHT * 0.5 }]}>
         <View style={styles.sheetHeader}>
-          <Text style={styles.sheetTitle}>Nearby Active Workers</Text>
+          <Text style={styles.sheetTitle}>Dispatched Workers</Text>
           <View style={styles.liveBadge}><Text style={styles.liveText}>● LIVE</Text></View>
         </View>
         
-        <Text style={styles.sheetDesc}>
-          Public Tracking ensures transparency and allows you to view municipal workers dispatched in your current zone.
-        </Text>
+        <ScrollView showsVerticalScrollIndicator={false} style={styles.scrollArea}>
+          <Text style={styles.sheetDesc}>
+            Real-time public tracking ensures accountability of municipal services in your zone.
+          </Text>
 
-        <View style={styles.list}>
-          {MOCK_NEARBY_WORKERS.map(w => (
-            <View key={w.id} style={styles.workerCard}>
-              <View style={styles.wAvatar}><Text style={styles.wAvatarText}>{w.name[0]}</Text></View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.wName}>{w.name}</Text>
-                <Text style={styles.wStatus}>{w.status}</Text>
-              </View>
-              <View style={styles.wDistBox}>
-                <Text style={styles.wDist}>{w.distance} km</Text>
-              </View>
-            </View>
-          ))}
-        </View>
+          <View style={styles.list}>
+            {workers.length === 0 ? (
+              <Text style={styles.emptyText}>No active workers reported in this area.</Text>
+            ) : (
+              workers.map(w => (
+                <View key={w.userId} style={styles.workerCard}>
+                  <View style={styles.wAvatar}><Text style={styles.wAvatarText}>{w.userName[0]}</Text></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.wName}>{w.userName}</Text>
+                    <Text style={styles.wStatus}>{w.department || 'On Duty'}</Text>
+                  </View>
+                  <View style={styles.wDistBox}>
+                    <Text style={styles.wDist}>
+                      {calculateDistance(userLocation?.latitude, userLocation?.longitude, w.latitude, w.longitude)} km
+                    </Text>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        </ScrollView>
 
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Text style={styles.backBtnText}>Return to Login</Text>
+          <Text style={styles.backBtnText}>Return to Home</Text>
         </TouchableOpacity>
       </View>
     </View>

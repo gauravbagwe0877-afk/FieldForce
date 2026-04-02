@@ -13,6 +13,8 @@ import WorkerDetail from '../components/WorkerDetail'
 import useSimulation from '../hooks/useSimulation'
 import SidebarNav from '../components/SidebarNav'
 import AddWorkerPanel from '../components/AddWorkerPanel'
+import TaskAssignmentPanel from '../components/TaskAssignmentPanel'
+import AnalyticsDashboard from '../components/AnalyticsDashboard'
 
 export default function Dashboard() {
   const dispatch = useDispatch()
@@ -163,6 +165,10 @@ export default function Dashboard() {
                   <AlertsPanel />
                 ) : activeTab === 'addworker' ? (
                   <AddWorkerPanel />
+                ) : activeTab === 'tasks' ? (
+                  <TaskAssignmentPanel />
+                ) : activeTab === 'analytics' ? (
+                  <AnalyticsDashboard />
                 ) : (
                   <SosPanel />
                 )}

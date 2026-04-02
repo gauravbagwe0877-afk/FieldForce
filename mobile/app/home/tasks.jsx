@@ -1,22 +1,17 @@
 import { useState, useEffect } from 'react'
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, ActivityIndicator
+  TouchableOpacity, ActivityIndicator, RefreshControl
 } from 'react-native'
-import AsyncStorage from '@react-native-async-storage/async-storage'
-import { colors, radius } from '../../constants/theme'
 import { router } from 'expo-router'
-
-// Mock data: Tasks assigned by Admin/Manager
-const INITIAL_TASKS = [
-  { id: 'T-101', title: 'Inspect Water Pipeline', location: 'Connaught Place', status: 'pending', date: 'Today, 10:00 AM' },
-  { id: 'T-102', title: 'Repair Street Light', location: 'Karol Bagh', status: 'in-progress', date: 'Today, 01:00 PM' },
-  { id: 'T-103', title: 'Clear Debris', location: 'Lajpat Nagar', status: 'completed', date: 'Yesterday' },
-]
+import { colors, radius } from '../../constants/theme'
+import { API_BASE } from '../../lib/config'
+import { getAuthToken } from '../../lib/session'
 
 export default function TasksScreen() {
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
     loadTasks()
@@ -24,26 +19,36 @@ export default function TasksScreen() {
 
   async function loadTasks() {
     try {
-      const stored = await AsyncStorage.getItem('worker_tasks')
-      if (stored) {
-        setTasks(JSON.parse(stored))
-      } else {
-        // Initialize with default admin tasks
-        await AsyncStorage.setItem('worker_tasks', JSON.stringify(INITIAL_TASKS))
-        setTasks(INITIAL_TASKS)
+      const token = await getAuthToken()
+      const res = await fetch(`${API_BASE}/api/tasks`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setTasks(data)
       }
     } catch (e) {
       console.error("Failed to load tasks", e)
-      setTasks(INITIAL_TASKS)
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }
 
-  async function updateTaskStatus(id, newStatus) {
-    const updated = tasks.map(t => t.id === id ? { ...t, status: newStatus } : t)
-    setTasks(updated)
-    await AsyncStorage.setItem('worker_tasks', JSON.stringify(updated))
+  async function updateTaskStatus(taskId, newStatus) {
+    try {
+      const token = await getAuthToken()
+      const res = await fetch(`${API_BASE}/api/tasks/${taskId}/status?status=${newStatus}`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const updatedTask = await res.json()
+        setTasks(prev => prev.map(t => t.taskId === taskId ? updatedTask : t))
+      }
+    } catch (err) {
+      console.error('Error updating task status:', err)
+    }
   }
 
   const getStatusColor = (status) => {
@@ -63,7 +68,13 @@ export default function TasksScreen() {
   }
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+    <ScrollView 
+      style={styles.root} 
+      contentContainerStyle={styles.content}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadTasks(); }} />
+      }
+    >
       <Text style={styles.headerTitle}>Assigned Worklist</Text>
       <Text style={styles.headerSub}>Tasks allocated by your Manager</Text>
 
@@ -73,49 +84,51 @@ export default function TasksScreen() {
         </View>
       ) : (
         tasks.map(task => {
-          const statusColor = getStatusColor(task.status)
+          const statusColor = getStatusColor(task.status.toLowerCase())
           return (
-            <View key={task.id} style={styles.card}>
+            <View key={task.taskId} style={styles.card}>
               <View style={styles.cardHeader}>
-                <Text style={styles.taskId}>{task.id}</Text>
+                <Text style={styles.taskId}>TASK #{task.taskId}</Text>
                 <View style={[styles.badge, { backgroundColor: statusColor + '20', borderColor: statusColor + '40' }]}>
                   <Text style={[styles.badgeText, { color: statusColor }]}>
-                    {task.status.toUpperCase()}
+                    {task.status}
                   </Text>
                 </View>
               </View>
 
-              <Text style={styles.taskTitle}>{task.title}</Text>
+              <Text style={styles.taskTitle}>{task.taskTitle}</Text>
               
               <View style={styles.metaRow}>
-                <Text style={styles.metaIcon}>📍</Text>
-                <Text style={styles.metaText}>{task.location}</Text>
+                <Text style={styles.metaIcon}>📋</Text>
+                <Text style={styles.metaText}>{task.description || 'No description'}</Text>
               </View>
               <View style={styles.metaRow}>
                 <Text style={styles.metaIcon}>🕒</Text>
-                <Text style={styles.metaText}>{task.date}</Text>
+                <Text style={styles.metaText}>
+                  {task.startTime ? new Date(task.startTime).toLocaleTimeString() : 'Not started'}
+                </Text>
               </View>
 
               <View style={styles.actions}>
-                {task.status === 'pending' && (
+                {task.status === 'PENDING' && (
                   <TouchableOpacity 
                     style={[styles.btn, { backgroundColor: colors.accentBlue }]}
-                    onPress={() => updateTaskStatus(task.id, 'in-progress')}
+                    onPress={() => updateTaskStatus(task.taskId, 'IN_PROGRESS')}
                   >
                     <Text style={styles.btnText}>Start Task</Text>
                   </TouchableOpacity>
                 )}
-                {task.status === 'in-progress' && (
+                {task.status === 'IN_PROGRESS' && (
                   <TouchableOpacity 
                     style={[styles.btn, { backgroundColor: colors.accentGreen }]}
-                    onPress={() => router.push({ pathname: '/home/camera', params: { taskId: task.id } })}
+                    onPress={() => updateTaskStatus(task.taskId, 'COMPLETED')}
                   >
-                    <Text style={styles.btnText}>Take Photo Proof</Text>
+                    <Text style={styles.btnText}>Complete Task</Text>
                   </TouchableOpacity>
                 )}
-                {task.status === 'completed' && (
+                {task.status === 'COMPLETED' && (
                   <View style={styles.doneBox}>
-                    <Text style={styles.doneText}>✅ Completed</Text>
+                    <Text style={styles.doneText}>✅ Job Finished</Text>
                   </View>
                 )}
               </View>

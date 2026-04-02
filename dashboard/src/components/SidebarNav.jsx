@@ -49,6 +49,22 @@ export default function SidebarNav({ activeTab, onTabSelect, alertCount, sosCoun
         </button>
 
         <button 
+          className={`sidebar-nav-item ${activeTab === 'tasks' ? 'active' : ''}`}
+          onClick={() => onTabSelect('tasks')}
+        >
+          <span className="nav-icon">📋</span>
+          <span className="nav-text">Tasks</span>
+        </button>
+
+        <button 
+          className={`sidebar-nav-item ${activeTab === 'analytics' ? 'active' : ''}`}
+          onClick={() => onTabSelect('analytics')}
+        >
+          <span className="nav-icon">📊</span>
+          <span className="nav-text">Analytics</span>
+        </button>
+
+        <button 
           className={`sidebar-nav-item ${activeTab === 'addworker' ? 'active' : ''}`}
           onClick={() => onTabSelect('addworker')}
         >

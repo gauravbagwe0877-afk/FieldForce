@@ -68,7 +68,21 @@ public class LocationController {
     @GetMapping("/latest")
     @Transactional(readOnly = true)
     public ResponseEntity<List<LatestLocationResponse>> getLatestLocations() {
-        List<User> workers = userRepository.findByRole(User.Role.WORKER);
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        User currentUser = userRepository.findByEmail(auth.getName()).orElse(null);
+        if (currentUser == null) {
+            return ResponseEntity.status(401).build();
+        }
+
+        List<User> workers;
+        if (currentUser.getRole() == User.Role.ADMIN) {
+            workers = userRepository.findByRole(User.Role.WORKER);
+        } else if (currentUser.getRole() == User.Role.SUPERVISOR) {
+            workers = userRepository.findBySupervisor_UserId(currentUser.getUserId());
+        } else {
+            // Workers should only see themselves (or nothing, depending on policy)
+            workers = List.of(currentUser);
+        }
         List<GpsLog> latestLogs = gpsLogRepository.findLatestLocations();
 
         Map<Long, GpsLog> logByUserId = latestLogs.stream()
@@ -117,6 +131,48 @@ public class LocationController {
             r.setAccuracy(log.getAccuracy());
             r.setRecordedAt(log.getRecordedAt());
             r.setCheckedOut(checkedOut);
+            return r;
+        }).collect(Collectors.toList());
+
+        return ResponseEntity.ok(responses);
+    }
+
+    /**
+     * Public endpoint for the "Zone Monitoring" map.
+     * No auth required. Returns only active workers who are currently checked in today.
+     */
+    @GetMapping("/public")
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<LatestLocationResponse>> getPublicLocations() {
+        LocalDate today = LocalDate.now();
+        LocalDateTime start = today.atStartOfDay();
+        LocalDateTime end = today.plusDays(1).atStartOfDay();
+
+        // Get all workers who have an open attendance session today
+        List<User> activeWorkers = attendanceRepository.findAll().stream()
+                .filter(a -> a.getCheckInTime().isAfter(start) && a.getCheckInTime().isBefore(end) && a.getCheckOutTime() == null)
+                .map(Attendance::getUser)
+                .distinct()
+                .collect(Collectors.toList());
+
+        List<GpsLog> latestLogs = gpsLogRepository.findLatestLocations();
+        Map<Long, GpsLog> logByUserId = latestLogs.stream()
+                .collect(Collectors.toMap(g -> g.getUser().getUserId(), g -> g, (a, b) -> a));
+
+        List<LatestLocationResponse> responses = activeWorkers.stream().map(user -> {
+            GpsLog log = logByUserId.get(user.getUserId());
+            LatestLocationResponse r = new LatestLocationResponse();
+            r.setUserId(user.getUserId());
+            r.setUserName(user.getName());
+            r.setEmployeeCode(user.getEmployeeCode());
+            r.setDepartment(user.getDepartment());
+            r.setCheckedOut(false);
+            if (log != null) {
+                r.setLatitude(log.getLatitude());
+                r.setLongitude(log.getLongitude());
+                r.setAccuracy(log.getAccuracy());
+                r.setRecordedAt(log.getRecordedAt());
+            }
             return r;
         }).collect(Collectors.toList());
 
